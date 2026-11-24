@@ -1,0 +1,19 @@
+# Compilacion CMake / Ninja
+build/
+build_*/
+cmake-build-*/
+
+# Cache y binarios compilados de Godot
+app/.godot/
+app/bin/
+
+# Dependencia externa clonada localmente 
+gdextension/godot-cpp/
+
+.env
+.env.*
+.vscode/
+.vs/
+*.user
+*.pdb
+*.log
