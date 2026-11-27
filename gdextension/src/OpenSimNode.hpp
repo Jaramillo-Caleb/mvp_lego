@@ -31,6 +31,9 @@ public:
 
     bool set_target_rpm(double rpm);
     double get_target_rpm() const;
+    bool set_motor_rpm(const String& motor_id, double rpm);
+    double get_motor_rpm(const String& motor_id) const;
+    void clear_motor_rpms();
 
     bool start();
     void stop();
@@ -42,6 +45,7 @@ public:
     double get_input_rpm() const;
     double get_output_rpm() const;
     double get_component_rpm(const String& id) const;
+    double get_component_ratio(const String& id) const;
     bool is_component_connected(const String& id) const;
     PackedStringArray get_disconnected_components() const;
 

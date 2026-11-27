@@ -41,6 +41,7 @@ void test_default_24t_to_8t_forward_reverse_and_stop() {
     check_true(sim.is_running(), "1.6 State is Running");
     check_near(sim.input_rpm(), 60.0, "1.7 24T input is +60 RPM");
     check_near(sim.output_rpm(), -180.0, "1.8 8T output is -180 RPM");
+    check_near(sim.component_ratio("gear_8").value_or(0.0), -3.0, "1.9 Gear 8T ratio is -3.0");
 
     const auto rev_res = sim.reverse_direction();
     check_true(rev_res.ok, "2.1 Reverse succeeds");
@@ -241,6 +242,40 @@ void test_studio_wheel_and_partial_connected_mode() {
                "8.6 Disconnected list contains wheel_loose");
 }
 
+void test_differential_two_motor_drive_and_conflict() {
+    opensim::Simulation sim;
+    sim.set_strict_mode(false);
+    sim.graph().clear();
+
+    // Tren izquierdo (directo 1:1) y tren derecho (reductor 8T -> 24T = -1/3)
+    sim.graph().add_component(opensim::Component::make_motor("m_left"));
+    sim.graph().add_component(opensim::Component::make_shaft("a_left"));
+    sim.graph().add_component(opensim::Component::make_wheel("w_left"));
+    sim.graph().connect({"m_left", opensim::PortKind::RotationalAxis, "a_left", opensim::PortKind::RotationalAxis, opensim::ConnectionKind::Coaxial});
+    sim.graph().connect({"a_left", opensim::PortKind::RotationalAxis, "w_left", opensim::PortKind::RotationalAxis, opensim::ConnectionKind::Coaxial});
+
+    sim.graph().add_component(opensim::Component::make_motor("m_right"));
+    sim.graph().add_component(opensim::Component::make_gear("g8", 8));
+    sim.graph().add_component(opensim::Component::make_gear("g24", 24));
+    sim.graph().add_component(opensim::Component::make_wheel("w_right"));
+    sim.graph().connect({"m_right", opensim::PortKind::RotationalAxis, "g8", opensim::PortKind::RotationalAxis, opensim::ConnectionKind::Coaxial});
+    sim.graph().connect({"g8", opensim::PortKind::GearTeeth, "g24", opensim::PortKind::GearTeeth, opensim::ConnectionKind::ExternalGearMesh});
+    sim.graph().connect({"g24", opensim::PortKind::RotationalAxis, "w_right", opensim::PortKind::RotationalAxis, opensim::ConnectionKind::Coaxial});
+
+    sim.set_motor_rpm("m_left", 120.0);
+    sim.set_motor_rpm("m_right", 90.0);
+    check_true(sim.start().ok, "9.1 Differential two-motor robot starts");
+    check_near(sim.component_rpm("w_left").value_or(0.0), 120.0, "9.2 Left wheel spins at +120 RPM");
+    check_near(sim.component_rpm("w_right").value_or(0.0), -30.0, "9.3 Right reduced wheel spins at -30 RPM");
+    check_near(sim.component_ratio("w_right").value_or(0.0), -1.0 / 3.0, "9.4 Right wheel torque/speed ratio is -1/3");
+
+    // Acoplar dos motores en el mismo tren debe rechazarse
+    sim.graph().connect({"a_left", opensim::PortKind::RotationalAxis, "g8", opensim::PortKind::RotationalAxis, opensim::ConnectionKind::Coaxial});
+    const auto conflict = sim.recompute();
+    check_true(!conflict.ok && conflict.error == opensim::ErrorCode::KinematicConflict,
+               "9.5 Two motors coupled on same train rejected");
+}
+
 } // namespace
 
 int main() {
@@ -250,6 +285,7 @@ int main() {
     test_duplicate_connections_rejected();
     test_invalid_mechanism_produces_no_false_rpms();
     test_studio_wheel_and_partial_connected_mode();
+    test_differential_two_motor_drive_and_conflict();
 
     if (g_failures == 0) {
         std::cout << "\nALL TESTS PASSED.\n";

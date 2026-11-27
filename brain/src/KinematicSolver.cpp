@@ -25,23 +25,40 @@ SolveResult KinematicSolver::solve(
     Rpm motor_target_rpm,
     SimulationState state,
     SolveMode mode) const {
-    if (!std::isfinite(motor_target_rpm)) {
+    return solve_multi(graph, {}, motor_target_rpm, state, mode);
+}
+
+SolveResult KinematicSolver::solve_multi(
+    const ConnectionGraph& graph,
+    const std::map<ComponentId, Rpm>& motor_rpms,
+    Rpm default_motor_rpm,
+    SimulationState state,
+    SolveMode mode) const {
+    if (!std::isfinite(default_motor_rpm)) {
         return SolveResult{
-            false, ErrorCode::InvalidArgument, "Target RPM must be a finite number", {}, {}};
+            false, ErrorCode::InvalidArgument, "Target RPM must be a finite number", {}, {}, {}};
     }
 
     const auto& components = graph.components();
     if (components.empty()) {
         return SolveResult{
-            false, ErrorCode::NoMotor, "Mechanism has no components", {}, {}};
+            false, ErrorCode::NoMotor, "Mechanism has no components", {}, {}, {}};
     }
 
-    ComponentId motor_id;
-    int motor_count = 0;
+    std::vector<ComponentId> motors;
     for (const auto& [id, comp] : components) {
         if (comp.type == ComponentType::Motor) {
-            motor_id = id;
-            ++motor_count;
+            motors.push_back(id);
+            const auto it = motor_rpms.find(id);
+            if (it != motor_rpms.end() && !std::isfinite(it->second)) {
+                return SolveResult{
+                    false,
+                    ErrorCode::InvalidArgument,
+                    "Motor '" + id + "' target RPM must be finite",
+                    {},
+                    {},
+                    {}};
+            }
         }
         if (comp.type == ComponentType::Gear && comp.teeth <= 0) {
             return SolveResult{
@@ -49,19 +66,21 @@ SolveResult KinematicSolver::solve(
                 ErrorCode::InvalidArgument,
                 "Gear '" + id + "' has invalid tooth count",
                 {},
+                {},
                 {}};
         }
     }
 
-    if (motor_count == 0) {
+    if (motors.empty()) {
         return SolveResult{
-            false, ErrorCode::NoMotor, "Mechanism has no motor", {}, {}};
+            false, ErrorCode::NoMotor, "Mechanism has no motor", {}, {}, {}};
     }
-    if (motor_count > 1) {
+    if (mode == SolveMode::Strict && motors.size() > 1) {
         return SolveResult{
             false,
             ErrorCode::MultipleMotors,
-            "Multiple motors are not supported in the MVP",
+            "Multiple motors are not supported in Strict mode",
+            {},
             {},
             {}};
     }
@@ -75,6 +94,7 @@ SolveResult KinematicSolver::solve(
                 false,
                 ErrorCode::UnknownComponent,
                 "Connection references an unknown component",
+                {},
                 {},
                 {}};
         }
@@ -90,6 +110,7 @@ SolveResult KinematicSolver::solve(
                     ErrorCode::IncompatiblePorts,
                     "ExternalGearMesh requires valid gears with positive teeth",
                     {},
+                    {},
                     {}};
             }
             forward_ratio = -static_cast<double>(from->teeth) / static_cast<double>(to->teeth);
@@ -101,33 +122,69 @@ SolveResult KinematicSolver::solve(
     }
 
     std::map<ComponentId, double> unit_ratios;
-    std::queue<ComponentId> queue;
-    unit_ratios[motor_id] = 1.0;
-    queue.push(motor_id);
+    std::map<ComponentId, ComponentId> source_motor;
+    std::map<ComponentId, Rpm> rpms;
 
-    while (!queue.empty()) {
-        const ComponentId current = queue.front();
-        queue.pop();
-
-        const double current_ratio = unit_ratios[current];
-        const auto adj_it = adjacency.find(current);
-        if (adj_it == adjacency.end()) {
-            continue;
+    for (const auto& motor_id : motors) {
+        if (source_motor.contains(motor_id)) {
+            return SolveResult{
+                false,
+                ErrorCode::KinematicConflict,
+                "Two motors cannot be rigidly coupled on the same train at '" + motor_id + "'",
+                {},
+                {},
+                {}};
         }
 
-        for (const auto& edge : adj_it->second) {
-            const double candidate_ratio = current_ratio * edge.ratio;
-            const auto existing_it = unit_ratios.find(edge.target);
-            if (existing_it == unit_ratios.end()) {
-                unit_ratios.emplace(edge.target, candidate_ratio);
-                queue.push(edge.target);
-            } else if (std::abs(existing_it->second - candidate_ratio) > kRpmEpsilon) {
-                return SolveResult{
-                    false,
-                    ErrorCode::KinematicConflict,
-                    "Kinematic conflict detected at component '" + edge.target + "'",
-                    {},
-                    {}};
+        const auto rpm_it = motor_rpms.find(motor_id);
+        const Rpm target_for_motor = (rpm_it != motor_rpms.end()) ? rpm_it->second : default_motor_rpm;
+        const Rpm effective_motor_rpm =
+            (state == SimulationState::Running) ? normalize_zero(target_for_motor) : 0.0;
+
+        std::queue<ComponentId> queue;
+        unit_ratios[motor_id] = 1.0;
+        source_motor[motor_id] = motor_id;
+        rpms[motor_id] = effective_motor_rpm;
+        queue.push(motor_id);
+
+        while (!queue.empty()) {
+            const ComponentId current = queue.front();
+            queue.pop();
+
+            const double current_ratio = unit_ratios[current];
+            const auto adj_it = adjacency.find(current);
+            if (adj_it == adjacency.end()) {
+                continue;
+            }
+
+            for (const auto& edge : adj_it->second) {
+                const double candidate_ratio = current_ratio * edge.ratio;
+                const auto existing_it = unit_ratios.find(edge.target);
+                if (existing_it == unit_ratios.end()) {
+                    unit_ratios.emplace(edge.target, candidate_ratio);
+                    source_motor.emplace(edge.target, motor_id);
+                    rpms.emplace(edge.target, normalize_zero(effective_motor_rpm * candidate_ratio));
+                    queue.push(edge.target);
+                } else {
+                    if (source_motor[edge.target] != motor_id) {
+                        return SolveResult{
+                            false,
+                            ErrorCode::KinematicConflict,
+                            "Two independent motors are coupled together at '" + edge.target + "'",
+                            {},
+                            {},
+                            {}};
+                    }
+                    if (std::abs(existing_it->second - candidate_ratio) > kRpmEpsilon) {
+                        return SolveResult{
+                            false,
+                            ErrorCode::KinematicConflict,
+                            "Kinematic conflict detected at component '" + edge.target + "'",
+                            {},
+                            {},
+                            {}};
+                    }
+                }
             }
         }
     }
@@ -146,18 +203,17 @@ SolveResult KinematicSolver::solve(
             ErrorCode::DisconnectedMechanism,
             "One or more components are not connected to the motor",
             {},
+            {},
             std::move(disconnected)};
     }
 
-    const Rpm effective_motor_rpm =
-        (state == SimulationState::Running) ? normalize_zero(motor_target_rpm) : 0.0;
-
-    std::map<ComponentId, Rpm> rpms;
-    for (const auto& [id, ratio] : unit_ratios) {
-        rpms.emplace(id, normalize_zero(effective_motor_rpm * ratio));
-    }
-
-    return SolveResult{true, ErrorCode::None, "", std::move(rpms), std::move(disconnected)};
+    return SolveResult{
+        true,
+        ErrorCode::None,
+        "",
+        std::move(rpms),
+        std::move(unit_ratios),
+        std::move(disconnected)};
 }
 
 } // namespace opensim

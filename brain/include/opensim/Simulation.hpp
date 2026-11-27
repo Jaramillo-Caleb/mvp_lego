@@ -4,6 +4,7 @@
 #include "opensim/KinematicSolver.hpp"
 #include "opensim/Types.hpp"
 
+#include <map>
 #include <optional>
 #include <vector>
 
@@ -23,6 +24,8 @@ public:
 
     OperationResult set_io_components(ComponentId input_id, ComponentId output_id);
     OperationResult set_target_rpm(Rpm rpm);
+    OperationResult set_motor_rpm(const ComponentId& motor_id, Rpm rpm);
+    void clear_motor_rpms();
 
     OperationResult start();
     void stop();
@@ -35,9 +38,11 @@ public:
     [[nodiscard]] const OperationResult& status() const noexcept { return last_status_; }
 
     [[nodiscard]] Rpm target_rpm() const noexcept { return target_rpm_; }
+    [[nodiscard]] Rpm motor_rpm(const ComponentId& motor_id) const noexcept;
     [[nodiscard]] Rpm input_rpm() const noexcept;
     [[nodiscard]] Rpm output_rpm() const noexcept;
     [[nodiscard]] std::optional<Rpm> component_rpm(const ComponentId& id) const;
+    [[nodiscard]] std::optional<double> component_ratio(const ComponentId& id) const;
     [[nodiscard]] bool is_component_connected(const ComponentId& id) const;
     [[nodiscard]] const std::vector<ComponentId>& disconnected_components() const noexcept {
         return last_solve_.disconnected_components;
@@ -49,6 +54,7 @@ private:
     SimulationState state_{SimulationState::Stopped};
     bool strict_mode_{true};
     Rpm target_rpm_{60.0};
+    std::map<ComponentId, Rpm> motor_targets_;
     ComponentId input_component_id_;
     ComponentId output_component_id_;
     SolveResult last_solve_;

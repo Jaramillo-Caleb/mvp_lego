@@ -10,6 +10,7 @@ Simulation::Simulation() {
 
 void Simulation::load_default_mvp_mechanism() {
     graph_.clear();
+    motor_targets_.clear();
     state_ = SimulationState::Stopped;
     target_rpm_ = 60.0;
 
@@ -58,6 +59,20 @@ OperationResult Simulation::set_target_rpm(Rpm rpm) {
     return recompute();
 }
 
+OperationResult Simulation::set_motor_rpm(const ComponentId& motor_id, Rpm rpm) {
+    if (motor_id.empty() || !std::isfinite(rpm)) {
+        return OperationResult::failure(
+            ErrorCode::InvalidArgument, "Motor ID and RPM must be valid");
+    }
+    motor_targets_[motor_id] = (rpm == 0.0) ? 0.0 : rpm;
+    return recompute();
+}
+
+void Simulation::clear_motor_rpms() {
+    motor_targets_.clear();
+    recompute();
+}
+
 OperationResult Simulation::start() {
     state_ = SimulationState::Running;
     const OperationResult res = recompute();
@@ -75,6 +90,12 @@ void Simulation::stop() {
 OperationResult Simulation::reverse_direction() {
     if (target_rpm_ != 0.0) {
         target_rpm_ = -target_rpm_;
+    }
+    for (auto& [id, rpm] : motor_targets_) {
+        (void)id;
+        if (rpm != 0.0) {
+            rpm = -rpm;
+        }
     }
     return recompute();
 }
@@ -100,7 +121,8 @@ OperationResult Simulation::recompute() {
 
     const SolveMode solve_mode =
         strict_mode_ ? SolveMode::Strict : SolveMode::PartialConnected;
-    last_solve_ = solver_.solve(graph_, target_rpm_, state_, solve_mode);
+    last_solve_ = solver_.solve_multi(
+        graph_, motor_targets_, target_rpm_, state_, solve_mode);
     if (!last_solve_.ok) {
         last_status_ = OperationResult::failure(last_solve_.error, last_solve_.message);
         return last_status_;
@@ -111,6 +133,7 @@ OperationResult Simulation::recompute() {
             output_component_id_.empty() || !last_solve_.rpms.contains(output_component_id_)) {
             last_solve_.ok = false;
             last_solve_.rpms.clear();
+            last_solve_.ratios.clear();
             last_status_ = OperationResult::failure(
                 ErrorCode::UnknownComponent,
                 "Input or output component is not present in solved mechanism");
@@ -120,6 +143,11 @@ OperationResult Simulation::recompute() {
 
     last_status_ = OperationResult::success();
     return last_status_;
+}
+
+Rpm Simulation::motor_rpm(const ComponentId& motor_id) const noexcept {
+    const auto it = motor_targets_.find(motor_id);
+    return (it == motor_targets_.end()) ? target_rpm_ : it->second;
 }
 
 Rpm Simulation::input_rpm() const noexcept {
@@ -144,6 +172,17 @@ std::optional<Rpm> Simulation::component_rpm(const ComponentId& id) const {
     }
     const auto it = last_solve_.rpms.find(id);
     if (it == last_solve_.rpms.end()) {
+        return std::nullopt;
+    }
+    return it->second;
+}
+
+std::optional<double> Simulation::component_ratio(const ComponentId& id) const {
+    if (!last_status_.ok) {
+        return std::nullopt;
+    }
+    const auto it = last_solve_.ratios.find(id);
+    if (it == last_solve_.ratios.end()) {
         return std::nullopt;
     }
     return it->second;

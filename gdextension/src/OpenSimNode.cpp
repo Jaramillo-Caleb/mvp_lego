@@ -33,6 +33,9 @@ void OpenSimNode::_bind_methods() {
 
     ClassDB::bind_method(D_METHOD("set_target_rpm", "rpm"), &OpenSimNode::set_target_rpm);
     ClassDB::bind_method(D_METHOD("get_target_rpm"), &OpenSimNode::get_target_rpm);
+    ClassDB::bind_method(D_METHOD("set_motor_rpm", "motor_id", "rpm"), &OpenSimNode::set_motor_rpm);
+    ClassDB::bind_method(D_METHOD("get_motor_rpm", "motor_id"), &OpenSimNode::get_motor_rpm);
+    ClassDB::bind_method(D_METHOD("clear_motor_rpms"), &OpenSimNode::clear_motor_rpms);
 
     ClassDB::bind_method(D_METHOD("start"), &OpenSimNode::start);
     ClassDB::bind_method(D_METHOD("stop"), &OpenSimNode::stop);
@@ -44,6 +47,7 @@ void OpenSimNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_input_rpm"), &OpenSimNode::get_input_rpm);
     ClassDB::bind_method(D_METHOD("get_output_rpm"), &OpenSimNode::get_output_rpm);
     ClassDB::bind_method(D_METHOD("get_component_rpm", "id"), &OpenSimNode::get_component_rpm);
+    ClassDB::bind_method(D_METHOD("get_component_ratio", "id"), &OpenSimNode::get_component_ratio);
     ClassDB::bind_method(D_METHOD("is_component_connected", "id"), &OpenSimNode::is_component_connected);
     ClassDB::bind_method(D_METHOD("get_disconnected_components"), &OpenSimNode::get_disconnected_components);
 
@@ -67,6 +71,7 @@ bool OpenSimNode::is_strict_mode() const {
 
 void OpenSimNode::clear_mechanism() {
     sim_.stop();
+    sim_.clear_motor_rpms();
     sim_.graph().clear();
     last_edit_status_ = sim_.recompute();
 }
@@ -148,6 +153,19 @@ double OpenSimNode::get_target_rpm() const {
     return sim_.target_rpm();
 }
 
+bool OpenSimNode::set_motor_rpm(const String& motor_id, double rpm) {
+    last_edit_status_ = sim_.set_motor_rpm(to_std_string(motor_id), rpm);
+    return last_edit_status_.ok;
+}
+
+double OpenSimNode::get_motor_rpm(const String& motor_id) const {
+    return sim_.motor_rpm(to_std_string(motor_id));
+}
+
+void OpenSimNode::clear_motor_rpms() {
+    sim_.clear_motor_rpms();
+}
+
 bool OpenSimNode::start() {
     last_edit_status_ = sim_.start();
     return last_edit_status_.ok;
@@ -181,6 +199,10 @@ double OpenSimNode::get_output_rpm() const {
 
 double OpenSimNode::get_component_rpm(const String& id) const {
     return sim_.component_rpm(to_std_string(id)).value_or(0.0);
+}
+
+double OpenSimNode::get_component_ratio(const String& id) const {
+    return sim_.component_ratio(to_std_string(id)).value_or(0.0);
 }
 
 bool OpenSimNode::is_component_connected(const String& id) const {

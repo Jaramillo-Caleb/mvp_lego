@@ -1,0 +1,21 @@
+LDraw Parts Library Attribution
+=============================
+The 3D LEGO-compatible part geometries in this folder (app/assets/parts/*.glb)
+were converted offline from the official LDraw Parts Library (https://www.ldraw.org).
+
+Parts used:
+- 95646.dat (Electric Mindstorms EV3 Brick)
+- 95658.dat (Electric Mindstorms EV3 Large Motor)
+- 99455.dat (Electric Mindstorms EV3 Medium Motor)
+- 95650.dat (Electric Mindstorms EV3 Colour Sensor)
+- 32524.dat (Technic Beam 7)
+- 32525.dat (Technic Beam 11)
+- 32140.dat (Technic Beam 2 x 4 Liftarm Bent 90)
+- 32073.dat (Technic Axle 5)
+- 3648b.dat (Technic Gear 24 Tooth)
+- 10928.dat (Technic Gear 8 Tooth Reinforced)
+- 2780.dat  (Technic Pin with Friction and Slots)
+- 56145.dat + 44309.dat (Wheel Rim + Tyre 43.2 x 22 ZR)
+
+License: Creative Commons Attribution 2.0 (CCAL 2.0) - LDraw.org Parts Library.
+Converted offline via Blender 4.5 + ldr_tools_blender.
